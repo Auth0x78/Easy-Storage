@@ -1,9 +1,8 @@
 # Easy-Storage
 It is a lightweight C++ class designed for simple data saving to files and loading from files. It provides efficient methods for writing data to disk and reading data from files, making it suitable for various applications where basic file-based data storage is required.
 
-## Features
-- **Efficient Data Saving:** Utilizes efficient file writing techniques to save data to disk.
-- **Error Handling:** Includes error codes for common file operation failures, facilitating straightforward error handling in client code.
+## Features.
+- **Error Handling:** Includes error codes for common file operation failures.
 - **File Checksum Checking:** Calculates and verifies checksums to detect file corruption.
 
 ## Usage
