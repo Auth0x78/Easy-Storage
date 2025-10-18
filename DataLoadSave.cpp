@@ -1,87 +1,79 @@
 #include "DataLoadSave.h"
+#include <vector>
 
+ErrorType DataLoadSave::SaveData(const std::string &filepath, void *data,
+                                 uint64_t size) {
+  if (size == 0 || data == nullptr) {
+    return ErrorType::FileEmpty;
+  }
 
-DataLoadSave::DataLoadSave()
-:m_seed(777){}
+  XXHash64 hasher(m_seed);
+  hasher.add(data, size);
 
-int DataLoadSave::SaveData(const std::string& filepath, void* data, uint64_t size)
-{
-	//Open file for writing in binary mode
-	std::ofstream file(filepath, std::ios_base::binary | std::ios_base::out);
-	
-	//Check if failed to open file
-	if (file.fail())
-		return FILE_OPEN_FAIL;
+  FileHeader header;
+  header.dataSize = size;
+  header.hash = hasher.hash();
 
-	//Generate a hash
-	XXHash64 hasher(m_seed);
-	hasher.add(data, size);
+  std::ofstream file(filepath, std::ios::binary | std::ios::trunc);
+  if (!file) {
+    return ErrorType::FailToOpenFile;
+  }
 
-	//Store the hash
-	uint64_t hash = hasher.hash();
+  file.write(reinterpret_cast<const char *>(&header), sizeof(FileHeader));
+  if (!file) {
+    file.close();
+    return ErrorType::FailToWrite;
+  }
 
-	//Starting the actual writing of data
-	file.write((char*)data, size);
-	file.write((char*)&hash, sizeof(hash));
+  file.write(reinterpret_cast<const char *>(data), header.dataSize);
+  if (!file) {
+    file.close();
+    return ErrorType::FailToWrite;
+  }
 
-	//Close the file
-	file.close();
-
-	//Return 0 if successful
-	return SUCCESS;
+  file.close();
+  return ErrorType::Success;
 }
 
-int DataLoadSave::LoadData(const std::string& filepath, char* src, uint64_t src_size)
-{
-	//Open file for Loading data
-	std::ifstream file(filepath, std::ios_base::binary);
+std::expected<std::string, ErrorType>
+DataLoadSave::LoadData(const std::string &filepath) {
+  // Open file for reading
+  std::ifstream file(filepath, std::ios::binary);
+  if (!file) {
+    return std::unexpected(ErrorType::FailToOpenFile);
+  }
 
-	//Check if file is open
-	if (file.fail())
-		return FILE_OPEN_FAIL;
+  // Read the header
+  FileHeader header;
+  file.read(reinterpret_cast<char *>(&header), sizeof(FileHeader));
+  if (file.gcount() != sizeof(FileHeader)) {
+    // File is too small to even contain the header
+    file.close();
+    return std::unexpected(ErrorType::FileEmpty);
+  }
 
-	//Start by calculating the file size
-	file.seekg(0, std::ios::end);
-	uint64_t fsize = file.tellg();
+  // Create a string of the correct size.
+  std::string loaded_data;
+  loaded_data.resize(header.dataSize);
 
-	//Reset moved file pointer to start again
-	file.seekg(0, std::ios::beg);
+  // Read the rest of the file (the data) directly into the string
+  file.read(loaded_data.data(), header.dataSize);
+  if (file.gcount() != header.dataSize) {
+    // File was shorter than the header promised
+    file.close();
+    return std::unexpected(ErrorType::FailToRead);
+  }
 
-	//if file is empty return -3
-	if (fsize == 0) 
-	{
-		file.close();
-		return FILE_EMPTY;
-	}
+  file.close();
 
-	//Subtract the last 64 bits or 8 bytes of hash to get data struct size
-	uint64_t datasize = fsize - sizeof(uint64_t);
+  // Verify the hash
+  XXHash64 hasher(m_seed);
+  hasher.add(loaded_data.data(), loaded_data.size());
 
-	if (datasize > src_size)
-	{
-		file.close();
-		return SRC_SIZE_NOT_SUFFICIENT;
-	}
+  if (hasher.hash() != header.hash) {
+    return std::unexpected(ErrorType::FileDataCorrupted);
+  }
 
-	//Read the file's data into address of src
-	file.read(src, src_size);
-
-	//Read the file checksum stored at the last of the file
-	uint64_t expectedHash = 0;
-	file.read((char*)&expectedHash, sizeof(expectedHash));
-
-	//Generate hash of the read data
-	XXHash64 hasher(m_seed);
-	hasher.add(&src, datasize);
-
-	//if checksum doesnt match then file is probably corrupted
-	if (expectedHash != hasher.hash())
-	{
-		file.close();
-		return FILE_CORRUPT;
-	}
-
-	file.close();
-	return SUCCESS;
+  // The compiler will optimize this return using NRVO
+  return loaded_data;
 }
-
